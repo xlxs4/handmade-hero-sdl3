@@ -1,0 +1,8 @@
+# JetBrains IDEs
+.idea/
+# CLion-generated CMake build dirs
+# e.g., cmake-build-debug
+cmake-build-*/
+# For clangd LSP
+compile_commands.json
+.cache/
