@@ -3,6 +3,8 @@
 # CLion-generated CMake build dirs
 # e.g., cmake-build-debug
 cmake-build-*/
+# Run cmake -S . -B build
+build/
 # For clangd LSP
 compile_commands.json
 .cache/
