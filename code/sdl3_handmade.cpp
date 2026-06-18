@@ -8,7 +8,9 @@
 #include <SDL3/SDL_init.h>
 #include <SDL3/SDL_log.h>
 #include <SDL3/SDL_messagebox.h>
+#include <SDL3/SDL_keyboard.h>
 #include <SDL3/SDL_render.h>
+#include <SDL3/SDL_scancode.h>
 #include <SDL3/SDL_video.h>
 
 #define internal        static
@@ -116,14 +118,14 @@ internal void PlatformLayer_ResizeBackBuffer(
     if (buffer->pixels) {
         free(buffer->pixels);
     }
-    size_t bitmap_size = buffer->width * buffer->height * buffer->bytesPerPixel;
-    buffer->pixels = malloc(bitmap_size);
     buffer->bytesPerPixel = SDL_BYTESPERPIXEL(buffer->format);
+    size_t bitmap_size = buffer->width * buffer->height * buffer->bytesPerPixel;
     buffer->pitch = buffer->width * buffer->bytesPerPixel;
+    buffer->pixels = malloc(bitmap_size);
 }
 
 int main() {
-    // SDL_Log and SDL_ShowSimpleMessageBox work
+    // NOTE(orestis): SDL_Log and SDL_ShowSimpleMessageBox work
     // without initializing the video subsystem, and can work without
     // initialization.
     bool ok = SDL_InitSubSystem(SDL_INIT_VIDEO);
@@ -195,6 +197,7 @@ int main() {
                     GAME_IS_RUNNING = false;
                     break;
                 }
+                // NOTE(orestis):
                 // https://wiki.libsdl.org/SDL3/README-highdpi
                 // In SDL3, there's a difference between points and pixels:
                 //
@@ -222,21 +225,31 @@ int main() {
                         &GLOBAL_BACKBUFFER
                     );
                     if (!GLOBAL_BACKBUFFER.texture) {
-                        // TODO(orestis): How and where should I handle this error?
                         SDL_Log("Could not create texture: %s", SDL_GetError());
                     }
                     break;
                 }
-                // No need to log anything for now.
-                // default: {
-                //     SDL_Log("%d", event.type);
-                //     break;
-                // }
             }
         }
+        // NOTE(orestis): From the SDL3 docs:
+        // > The pointer returned is a pointer to an internal SDL array. 
+        // > It will be valid for the whole lifetime of the application
+        // > and should not be freed by the caller.
+        const bool* keyStates = SDL_GetKeyboardState(0);
+        if (keyStates[SDL_SCANCODE_W]) {
+            yOffset--;
+        }
+        if (keyStates[SDL_SCANCODE_A]) {
+            xOffset--;
+        }
+        if (keyStates[SDL_SCANCODE_S]) {
+            yOffset++;
+        }
+        if (keyStates[SDL_SCANCODE_D]) {
+            xOffset++;
+        }
         RenderWeirdGradient(GLOBAL_BACKBUFFER, xOffset, yOffset);
-        ++xOffset;
-        ++yOffset;
+        // TODO(orestis): Add gamepad support when I actually get a gamepad controller.
 
         if (!SDL_RenderClear(renderer)) {
             SDL_Log("Could not clear renderer: %s", SDL_GetError());
@@ -251,7 +264,7 @@ int main() {
         }
     }
 
-    // We don't free on shutdown. We let the OS reclaim everything
+    // NOTE(orestis): We don't free on shutdown. We let the OS reclaim everything
     // at process exit instead of freeing stuff one by one.
     SDL_Quit();
     return 0;
