@@ -25,20 +25,29 @@ typedef int16_t i16;
 typedef int32_t i32;
 typedef int64_t i64;
 
-global_variable bool game_is_running;
+struct PlatformLayer_OffscreenBuffer {
+    SDL_Texture*    texture;
+    void*           pixels;
+    SDL_PixelFormat format;
+    int             width;
+    int             height;
+    int             pitch;
+    int             bytesPerPixel;
+};
 
-global_variable SDL_Texture* bitmap_texture;
-global_variable void* bitmap_pixels;
-global_variable int bitmap_width;
-global_variable int bitmap_height;
-global_variable int bytes_per_pixel = 4;
+// TODO(orestis): These are global for now.
+global_variable bool GAME_IS_RUNNING;
+global_variable PlatformLayer_OffscreenBuffer GLOBAL_BACKBUFFER;
 
-internal void render_weird_gradient(int x_offset, int y_offset) {
-    int pitch = bitmap_width * bytes_per_pixel;
-    u8* row = (u8*)bitmap_pixels;
-    for (int y = 0; y < bitmap_height; ++y) {
+internal void RenderWeirdGradient(
+    PlatformLayer_OffscreenBuffer buffer,
+    int xOffset, int yOffset
+) {
+    u8* row = (u8*)buffer.pixels;
+    for (int y = 0; y < buffer.height; ++y) {
+        // u32 writes can be faster than u8 writes.
         u32* pixel = (u32*)row;
-        for (int x = 0; x < bitmap_width; ++x) {
+        for (int x = 0; x < buffer.width; ++x) {
             // NOTE(orestis): Due to little endian architecture, if you
             // have RR GG BB XX 32 bits, you'll get
             //      XX BB GG RR
@@ -49,11 +58,11 @@ internal void render_weird_gradient(int x_offset, int y_offset) {
             //                                     XX RR GG BB
             // I don't know if that's the same historical reason SDL3
             // works in the same manner.
-            u8 blue = x + x_offset;
-            u8 green = y + y_offset;
+            u8 blue = x + xOffset;
+            u8 green = y + yOffset;
             *pixel++ = (green << 8) | blue;
         }
-        row += pitch;
+        row += buffer.pitch;
     }
 
     // NOTE(orestis): This is not how you typically use SDL3.
@@ -67,35 +76,50 @@ internal void render_weird_gradient(int x_offset, int y_offset) {
     // one Casey follows: we don't own the backbuffer, SDL does, and gives us a
     // pointer to the pixels and the pitch.
     // For now, I want to lean towards Handmade style: we own the backbuffer.
-    bool ok = SDL_UpdateTexture(bitmap_texture, 0, bitmap_pixels, pitch);
+    bool ok = SDL_UpdateTexture(buffer.texture, 0, buffer.pixels, buffer.pitch);
     if (!ok) {
         SDL_Log("Could not update bitmap texture: %s", SDL_GetError());
     }
 }
 
-internal void resize_bitmap_texture(
-    SDL_Renderer*     renderer,
-    SDL_PixelFormat   format,
-    SDL_TextureAccess access
+internal void PlatformLayer_InitBackbuffer(
+    PlatformLayer_OffscreenBuffer* buffer,
+    int                            width,
+    int                            height,
+    SDL_PixelFormat                format
+) {
+    buffer->width = width;
+    buffer->height = height;
+    buffer->format = format;
+    int bytesPerPixel = SDL_BYTESPERPIXEL(format);
+    buffer->bytesPerPixel = bytesPerPixel;
+    buffer->pitch = width * bytesPerPixel;
+}
+
+internal void PlatformLayer_ResizeBackBuffer(
+    SDL_Renderer*                  renderer,
+    SDL_TextureAccess              access,
+    PlatformLayer_OffscreenBuffer* buffer
 ) {
     // TODO(orestis): Maybe don't free first, free after,
     // then free first if that fails.
-    if (bitmap_texture) {
-        SDL_DestroyTexture(bitmap_texture);
+    if (buffer->texture) {
+        SDL_DestroyTexture(buffer->texture);
     }
-    bitmap_texture = SDL_CreateTexture(
+    buffer->texture = SDL_CreateTexture(
         renderer,
-        format,
+        buffer->format,
         access,
-        bitmap_width, bitmap_height
+        buffer->width, buffer->height
     );
 
-    if (bitmap_pixels) {
-        free(bitmap_pixels);
+    if (buffer->pixels) {
+        free(buffer->pixels);
     }
-    size_t bitmap_size = bitmap_width * bitmap_height * bytes_per_pixel;
-    bitmap_pixels = malloc(bitmap_size);
-    // TODO(orestis): Probably want to clear this to black
+    size_t bitmap_size = buffer->width * buffer->height * buffer->bytesPerPixel;
+    buffer->pixels = malloc(bitmap_size);
+    buffer->bytesPerPixel = SDL_BYTESPERPIXEL(buffer->format);
+    buffer->pitch = buffer->width * buffer->bytesPerPixel;
 }
 
 int main() {
@@ -134,32 +158,41 @@ int main() {
         return 1;
     }
 
-    if (!SDL_GetRenderOutputSize(renderer, &bitmap_width, &bitmap_height)) {
-        SDL_Log("Could not get renderer output size: %s", SDL_GetError());
-        return 1;
+    {
+        int width;
+        int height;
+        if (!SDL_GetRenderOutputSize(renderer, &width, &height)) {
+            SDL_Log("Could not get renderer output size: %s", SDL_GetError());
+            return 1;
+        }
+        PlatformLayer_InitBackbuffer(
+            &GLOBAL_BACKBUFFER,
+            width, height,
+            SDL_PIXELFORMAT_XRGB8888
+        );
     }
 
     // Writes to global_variable bitmap_texture.
-    resize_bitmap_texture(
+    PlatformLayer_ResizeBackBuffer(
         renderer,
-        SDL_PIXELFORMAT_XRGB8888,
-        SDL_TEXTUREACCESS_STREAMING
+        SDL_TEXTUREACCESS_STREAMING,
+        &GLOBAL_BACKBUFFER
     );
-    if (!bitmap_texture) {
+    if (!GLOBAL_BACKBUFFER.texture) {
         SDL_Log("Could not create texture: %s", SDL_GetError());
         return 1;
     }
 
-    int x_offset = 0;
-    int y_offset = 0;
+    int xOffset = 0;
+    int yOffset = 0;
 
-    game_is_running = true;
-    while (game_is_running) {
+    GAME_IS_RUNNING = true;
+    while (GAME_IS_RUNNING) {
         SDL_Event event;
         while (SDL_PollEvent(&event)) {
             switch (event.type) {
                 case SDL_EVENT_QUIT: {
-                    game_is_running = false;
+                    GAME_IS_RUNNING = false;
                     break;
                 }
                 // https://wiki.libsdl.org/SDL3/README-highdpi
@@ -178,17 +211,17 @@ int main() {
                 // since we're following Casey's approach of working with our own
                 // backbuffer.
                 case SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED: {
-                    ok = SDL_GetRenderOutputSize(renderer, &bitmap_width, &bitmap_height);
+                    ok = SDL_GetRenderOutputSize(renderer, &GLOBAL_BACKBUFFER.width, &GLOBAL_BACKBUFFER.height);
                     if (!ok) {
                         SDL_Log("Could not get renderer output size: %s", SDL_GetError());
                     }
-                    SDL_Log("Window resized. New pixel size: %d x %d", bitmap_width, bitmap_height);
-                    resize_bitmap_texture(
+                    SDL_Log("Window resized. New pixel size: %d x %d", GLOBAL_BACKBUFFER.width, GLOBAL_BACKBUFFER.height);
+                    PlatformLayer_ResizeBackBuffer(
                         renderer,
-                        SDL_PIXELFORMAT_XRGB8888,
-                        SDL_TEXTUREACCESS_STREAMING
+                        SDL_TEXTUREACCESS_STREAMING,
+                        &GLOBAL_BACKBUFFER
                     );
-                    if (!bitmap_texture) {
+                    if (!GLOBAL_BACKBUFFER.texture) {
                         // TODO(orestis): How and where should I handle this error?
                         SDL_Log("Could not create texture: %s", SDL_GetError());
                     }
@@ -201,14 +234,15 @@ int main() {
                 // }
             }
         }
-        render_weird_gradient(x_offset, y_offset);
-        ++x_offset;
+        RenderWeirdGradient(GLOBAL_BACKBUFFER, xOffset, yOffset);
+        ++xOffset;
+        ++yOffset;
 
         if (!SDL_RenderClear(renderer)) {
             SDL_Log("Could not clear renderer: %s", SDL_GetError());
             break;
         }
-        if (!SDL_RenderTexture(renderer, bitmap_texture, 0, 0)) {
+        if (!SDL_RenderTexture(renderer, GLOBAL_BACKBUFFER.texture, 0, 0)) {
             SDL_Log("Could not copy texture to backbuffer: %s", SDL_GetError());
             break;
         }
