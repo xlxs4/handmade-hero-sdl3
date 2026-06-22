@@ -12,6 +12,7 @@
 #include <SDL3/SDL_render.h>
 #include <SDL3/SDL_scancode.h>
 #include <SDL3/SDL_video.h>
+#include <SDL3/SDL_gamepad.h>
 
 #define internal        static
 #define local_persist   static
@@ -40,16 +41,20 @@ struct PlatformLayer_OffscreenBuffer {
 // TODO(orestis): These are global for now.
 global_variable bool GAME_IS_RUNNING;
 global_variable PlatformLayer_OffscreenBuffer GLOBAL_BACKBUFFER;
+global_variable SDL_Gamepad* GAMEPAD;
+// NOTE(orestis): XInput recommended value for left thumb deadzone
+// https://learn.microsoft.com/en-us/windows/win32/xinput/getting-started-with-xinput#dead-zone
+global_variable int GAMEPAD_LEFT_THUMB_DEADZONE = 7849;
 
 internal void RenderWeirdGradient(
-    PlatformLayer_OffscreenBuffer buffer,
+    PlatformLayer_OffscreenBuffer* buffer,
     int xOffset, int yOffset
 ) {
-    u8* row = (u8*)buffer.pixels;
-    for (int y = 0; y < buffer.height; ++y) {
+    u8* row = (u8*)buffer->pixels;
+    for (int y = 0; y < buffer->height; ++y) {
         // u32 writes can be faster than u8 writes.
         u32* pixel = (u32*)row;
-        for (int x = 0; x < buffer.width; ++x) {
+        for (int x = 0; x < buffer->width; ++x) {
             // NOTE(orestis): Due to little endian architecture, if you
             // have RR GG BB XX 32 bits, you'll get
             //      XX BB GG RR
@@ -64,7 +69,7 @@ internal void RenderWeirdGradient(
             u8 green = y + yOffset;
             *pixel++ = (green << 8) | blue;
         }
-        row += buffer.pitch;
+        row += buffer->pitch;
     }
 
     // NOTE(orestis): This is not how you typically use SDL3.
@@ -78,7 +83,7 @@ internal void RenderWeirdGradient(
     // one Casey follows: we don't own the backbuffer, SDL does, and gives us a
     // pointer to the pixels and the pitch.
     // For now, I want to lean towards Handmade style: we own the backbuffer.
-    bool ok = SDL_UpdateTexture(buffer.texture, 0, buffer.pixels, buffer.pitch);
+    bool ok = SDL_UpdateTexture(buffer->texture, 0, buffer->pixels, buffer->pitch);
     if (!ok) {
         SDL_Log("Could not update bitmap texture: %s", SDL_GetError());
     }
@@ -143,6 +148,10 @@ int main() {
         return 1;
     }
 
+    ok = SDL_InitSubSystem(SDL_INIT_GAMEPAD);
+    if (!ok) {
+        SDL_Log("Could not initialize gamepad subsystem: %s", SDL_GetError());
+    }
 
     SDL_Window* window = SDL_CreateWindow(
         "Handmade Hero",
@@ -229,6 +238,22 @@ int main() {
                     }
                     break;
                 }
+                case SDL_EVENT_GAMEPAD_ADDED: {
+                    if (!GAMEPAD) {
+                        GAMEPAD = SDL_OpenGamepad(event.gdevice.which);
+                        if (!GAMEPAD) {
+                            SDL_Log("Could not open gamepad: %s", SDL_GetError());
+                        }
+                    }
+                    break;
+                }
+                case SDL_EVENT_GAMEPAD_REMOVED: {
+                    if (GAMEPAD && (SDL_GetGamepadID(GAMEPAD) == event.gdevice.which)) {
+                        SDL_CloseGamepad(GAMEPAD);
+                        GAMEPAD = 0;
+                    }
+                    break;
+                }
             }
         }
         // NOTE(orestis): From the SDL3 docs:
@@ -237,19 +262,30 @@ int main() {
         // > and should not be freed by the caller.
         const bool* keyStates = SDL_GetKeyboardState(0);
         if (keyStates[SDL_SCANCODE_W]) {
-            yOffset--;
+            --yOffset;
         }
         if (keyStates[SDL_SCANCODE_A]) {
-            xOffset--;
+            --xOffset;
         }
         if (keyStates[SDL_SCANCODE_S]) {
-            yOffset++;
+            ++yOffset;
         }
         if (keyStates[SDL_SCANCODE_D]) {
-            xOffset++;
+            ++xOffset;
         }
-        RenderWeirdGradient(GLOBAL_BACKBUFFER, xOffset, yOffset);
-        // TODO(orestis): Add gamepad support when I actually get a gamepad controller.
+
+        if (GAMEPAD) {
+            i16 axisX = SDL_GetGamepadAxis(GAMEPAD, SDL_GAMEPAD_AXIS_LEFTX);
+            i16 axisY = SDL_GetGamepadAxis(GAMEPAD, SDL_GAMEPAD_AXIS_LEFTY);
+            if (SDL_abs(axisX) > GAMEPAD_LEFT_THUMB_DEADZONE) {
+                xOffset += axisX >> 12;
+            }
+            if (SDL_abs(axisY) > GAMEPAD_LEFT_THUMB_DEADZONE) {
+                yOffset += axisY >> 12;
+            }
+        }
+
+        RenderWeirdGradient(&GLOBAL_BACKBUFFER, xOffset, yOffset);
 
         if (!SDL_RenderClear(renderer)) {
             SDL_Log("Could not clear renderer: %s", SDL_GetError());
