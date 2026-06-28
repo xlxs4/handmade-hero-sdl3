@@ -1,0 +1,33 @@
+{
+	"folders":
+	[
+		{
+			"path": ".",
+			"name": "config",
+			"folder_exclude_patterns": ["*"],
+			"file_include_patterns": [
+				".gitignore", "build_and_run.sh", "CMakeLists.txt", "handmade.sublime-project",
+			]
+		},
+		{
+			"path": "code"
+		},
+		{
+			"path": "vendored/SDL/include",
+			"name": "SDL headers"
+		},
+		{
+			"path": "vendored/SDL/src",
+			"name": "SDL source"
+		}
+	],
+	"build_systems":
+	[
+		{
+			"name": "Handmade",
+			"shell_cmd": "./build_and_run.sh",
+			"working_dir": "$project_path",
+			"file_regex": "^([^:\\n]+):(\\d+):(\\d+): (error: .+)$"
+		}
+	]
+}

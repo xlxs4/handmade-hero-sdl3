@@ -8,3 +8,5 @@ build/
 # For clangd LSP
 compile_commands.json
 .cache/
+# Sublime Text
+handmade.sublime-workspace
