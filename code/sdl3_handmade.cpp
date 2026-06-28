@@ -2,6 +2,7 @@
 #include <cstdint>
 #include <cstdlib>
 
+#include <SDL3/SDL_audio.h>
 #include <SDL3/SDL_events.h>
 #include <SDL3/SDL_pixels.h>
 #include <SDL3/SDL_error.h>
@@ -38,9 +39,15 @@ struct PlatformLayer_OffscreenBuffer {
     int             bytesPerPixel;
 };
 
+struct PlatformLayer_Audio {
+    SDL_AudioSpec    spec;
+    SDL_AudioStream* stream;
+};
+
 // TODO(orestis): These are global for now.
 global_variable bool GAME_IS_RUNNING;
 global_variable PlatformLayer_OffscreenBuffer GLOBAL_BACKBUFFER;
+global_variable PlatformLayer_Audio GLOBAL_AUDIO;
 global_variable SDL_Gamepad* GAMEPAD;
 // NOTE(orestis): XInput recommended value for left thumb deadzone
 // https://learn.microsoft.com/en-us/windows/win32/xinput/getting-started-with-xinput#dead-zone
@@ -129,11 +136,28 @@ internal void PlatformLayer_ResizeBackBuffer(
     buffer->pixels = malloc(bitmap_size);
 }
 
+internal void PlatformLayer_InitAudio(PlatformLayer_Audio* audio) {
+    audio->spec = { SDL_AUDIO_S16, 2, 48000 };
+    audio->stream = SDL_OpenAudioDeviceStream(
+        SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK,
+        &audio->spec,
+        0,
+        0
+    );
+    if (!audio->stream) {
+        SDL_Log("Could not initialize audio stream: %s", SDL_GetError());
+    }
+}
+
 int main() {
+    bool ok = SDL_SetAppMetadata("Handmade Hero", "0.0.1", "com.example.handmade");
+    if (!ok) {
+        SDL_Log("Could not set app metadata: %s", SDL_GetError());
+    }
     // NOTE(orestis): SDL_Log and SDL_ShowSimpleMessageBox work
     // without initializing the video subsystem, and can work without
     // initialization.
-    bool ok = SDL_InitSubSystem(SDL_INIT_VIDEO);
+    ok = SDL_InitSubSystem(SDL_INIT_VIDEO);
     if (!ok) {
         SDL_Log("Could not initialize video subsystem: %s", SDL_GetError());
         ok = SDL_ShowSimpleMessageBox(
@@ -146,6 +170,11 @@ int main() {
             SDL_Log("Could not show message box: %s", SDL_GetError());
         }
         return 1;
+    }
+
+    ok = SDL_InitSubSystem(SDL_INIT_AUDIO);
+    if (!ok) {
+        SDL_Log("Could not initialize audio subsystem: %s", SDL_GetError());
     }
 
     ok = SDL_InitSubSystem(SDL_INIT_GAMEPAD);
@@ -193,6 +222,8 @@ int main() {
         SDL_Log("Could not create texture: %s", SDL_GetError());
         return 1;
     }
+
+    PlatformLayer_InitAudio(&GLOBAL_AUDIO);
 
     int xOffset = 0;
     int yOffset = 0;
